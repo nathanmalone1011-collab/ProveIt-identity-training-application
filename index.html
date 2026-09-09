@@ -1,0 +1,1251 @@
+import React, { useState, useEffect, useRef, Component } from 'react';
+import { 
+  ShieldCheck, 
+  Video, 
+  Mic, 
+  MicOff, 
+  Square,
+  Sparkles, 
+  Flame, 
+  CheckCircle2, 
+  ArrowRight, 
+  Award, 
+  BarChart3, 
+  Play, 
+  Pause,
+  RefreshCw, 
+  BookOpen, 
+  Share2, 
+  TrendingUp, 
+  Clock, 
+  Zap, 
+  AlertCircle,
+  AlertTriangle,
+  FileText,
+  Lock,
+  Edit3,
+  Check,
+  X,
+  Volume2,
+  Activity,
+  Layers
+} from 'lucide-react';
+
+// Environment variables provided at runtime
+const apiKey = ""; 
+
+// Error Boundary to prevent white screen crashes
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.warn("ProveIt ErrorBoundary caught an error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#FAF7F2] text-stone-800 p-8 flex flex-col items-center justify-center text-center">
+          <div className="bg-white p-8 rounded-3xl border border-stone-200 shadow-md max-w-md space-y-4">
+            <div className="p-3 bg-rose-100 text-rose-600 rounded-2xl w-12 h-12 flex items-center justify-center mx-auto">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h2 className="text-2xl font-black text-stone-900">App Encountered an Error</h2>
+            <p className="text-xs text-stone-500">
+              An issue occurred while loading browser audio or UI state.
+            </p>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+              }}
+              className="px-6 py-3 bg-stone-900 text-white font-bold rounded-2xl text-xs hover:bg-stone-800 transition-all shadow-sm"
+            >
+              Recover App
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Identity Tracks
+const TRACKS = [
+  {
+    id: 'public_speaking',
+    title: 'Public Speaking Confidence',
+    target: 'I am someone who enjoys public speaking.',
+    prompt: 'Deliver a 60-second pitch introducing yourself and a project you care about.',
+    sampleTranscript: "Hi everyone. Um... today I want to share a project I've been working on. It's... like, an identity training app designed to build real public speaking confidence. You know, most people carry around fear, so... uh, this app measures actual performance.",
+    metric: 'Filler Words & Vocal Hesitation',
+    accentBg: 'bg-orange-100 text-orange-800 border-orange-200',
+    icon: '🎤'
+  },
+  {
+    id: 'cold_calling',
+    title: 'Cold Outreach & Sales',
+    target: 'I am someone who comfortably makes cold calls.',
+    prompt: 'Introduce your product to an executive and request a 15-minute meeting.',
+    sampleTranscript: "Hello Sarah, um... I know you're busy, but... uh, I saw your team is expanding outreach. We developed a tool that reduces rep hesitation by 40%. Would you be open to... like... a 15-minute discussion this Thursday?",
+    metric: 'Time to First Word & Tone Clarity',
+    accentBg: 'bg-rose-100 text-rose-800 border-rose-200',
+    icon: '📞'
+  },
+  {
+    id: 'assertive_meetings',
+    title: 'Executive Presence in Meetings',
+    target: 'I am someone who speaks up early in high-stakes meetings.',
+    prompt: 'Voice a gentle disagreement with a strategy and offer a clear alternative.',
+    sampleTranscript: "I see why we are leaning towards option A, but... um, I have a concern regarding the timeline. If we shift resources to option B instead, we... like... mitigate risk and deliver two weeks earlier.",
+    metric: 'Monotone Index & Pause Length',
+    accentBg: 'bg-amber-100 text-amber-800 border-amber-200',
+    icon: '💼'
+  }
+];
+
+function ProveItApp() {
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'archived', 'marketplace'
+  const [selectedTrack, setSelectedTrack] = useState(TRACKS[0]);
+  
+  // 7-Day Sprint State with Timestamp Locks
+  const [sprintState, setSprintState] = useState({
+    active: false,
+    trackId: 'public_speaking',
+    currentDay: 0, // 0 = baseline, 1-6 = active work, 7 = day seven final test
+    baselineRecorded: false,
+    baselineMetrics: null,
+    calibratedAffirmation: '',
+    proofActionDoneToday: false,
+    writingCompletedToday: false,
+    lastCompletedTimestamp: null,
+    history: {},
+    finalMetrics: null,
+    completed: false
+  });
+
+  // UI Flow Modal & Audio State
+  const [recordingStage, setRecordingStage] = useState('idle'); // 'idle', 'recording', 'analyzing', 'done'
+  const [recordedText, setRecordedText] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [micError, setMicError] = useState('');
+  
+  // Strict Writing State
+  const [writingInput, setWritingInput] = useState('');
+  const [writingMatchPercent, setWritingMatchPercent] = useState(0);
+  const [writingIsExact, setWritingIsExact] = useState(false);
+
+  // Time Lock State (24 hours between days)
+  const [timeRemainingSeconds, setTimeRemainingSeconds] = useState(0);
+  const [bypassTimeLock, setBypassTimeLock] = useState(true); // Enabled for easy testing/review
+
+  // Archive of past reports
+  const [archive, setArchive] = useState([
+    {
+      id: 'arch_1',
+      date: '2026-02-14',
+      trackTitle: 'Public Speaking Confidence',
+      target: 'I am someone who delivers clear, steady pitches under pressure.',
+      baseline: { fillerCount: 11, paceWPM: 110, pauseLength: '3.2s', score: 58, clarity: 62 },
+      final: { fillerCount: 2, paceWPM: 142, pauseLength: '0.6s', score: 89, clarity: 91 },
+      deltaScore: '+31 pts',
+      reducedFillers: '81%'
+    }
+  ]);
+
+  // Audio Processing Refs
+  const timerRef = useRef(null);
+  const lockTimerRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const micStreamRef = useRef(null);
+  const animFrameRef = useRef(null);
+
+  // Initialize Speech & Audio Analyzer safely
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognitionRef.current = new SpeechRecognition();
+        recognitionRef.current.continuous = true;
+        recognitionRef.current.interimResults = true;
+
+        recognitionRef.current.onresult = (event) => {
+          let transcript = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            transcript += event.results[i][0].transcript;
+          }
+          if (transcript.trim()) {
+            setRecordedText(transcript);
+          }
+        };
+
+        recognitionRef.current.onerror = (err) => {
+          console.warn('Speech recognition notice:', err);
+          setMicError('Speech recognition restricted in this sandbox. You can use live speech simulation or edit your transcript below.');
+        };
+      } else {
+        setMicError('Speech API unavailable. You can use sample speech transcripts or type directly.');
+      }
+    } catch (e) {
+      setMicError('Speech API initialized in manual transcript mode.');
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (lockTimerRef.current) clearInterval(lockTimerRef.current);
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (micStreamRef.current && micStreamRef.current.getTracks) {
+        micStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, []);
+
+  // Check 24-Hour Lock Timer
+  useEffect(() => {
+    if (!sprintState.lastCompletedTimestamp || bypassTimeLock) {
+      setTimeRemainingSeconds(0);
+      return;
+    }
+
+    const updateTimer = () => {
+      const now = Date.now();
+      const elapsed = (now - sprintState.lastCompletedTimestamp) / 1000;
+      const totalSecondsIn24h = 86400; // 24 hours
+      const remaining = Math.max(0, Math.floor(totalSecondsIn24h - elapsed));
+      setTimeRemainingSeconds(remaining);
+    };
+
+    updateTimer();
+    lockTimerRef.current = setInterval(updateTimer, 1000);
+
+    return () => clearInterval(lockTimerRef.current);
+  }, [sprintState.lastCompletedTimestamp, bypassTimeLock]);
+
+  // Handle Strict Letter-by-Letter Affirmation Match Validation
+  const handleWritingChange = (val) => {
+    setWritingInput(val);
+    const target = sprintState.calibratedAffirmation.trim();
+    const current = val.trim();
+
+    if (!target) return;
+
+    if (current === target) {
+      setWritingIsExact(true);
+      setWritingMatchPercent(100);
+    } else {
+      setWritingIsExact(false);
+      let matchedChars = 0;
+      const minLen = Math.min(current.length, target.length);
+      for (let i = 0; i < minLen; i++) {
+        if (current[i] === target[i]) matchedChars++;
+        else break;
+      }
+      const pct = Math.min(99, Math.round((matchedChars / target.length) * 100));
+      setWritingMatchPercent(pct);
+    }
+  };
+
+  // Real Audio Hardware Visualizer Setup with strict fallbacks
+  const setupRealAudioAnalyser = async () => {
+    try {
+      if (navigator && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        micStreamRef.current = stream;
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          audioCtxRef.current = new AudioCtx();
+          analyserRef.current = audioCtxRef.current.createAnalyser();
+          const source = audioCtxRef.current.createMediaStreamSource(stream);
+          source.connect(analyserRef.current);
+          analyserRef.current.fftSize = 64;
+
+          const bufferLength = analyserRef.current.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+
+          const updateVolume = () => {
+            if (!analyserRef.current) return;
+            analyserRef.current.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < bufferLength; i++) {
+              sum += dataArray[i];
+            }
+            const avg = sum / bufferLength;
+            setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+            animFrameRef.current = requestAnimationFrame(updateVolume);
+          };
+          updateVolume();
+          return;
+        }
+      }
+      throw new Error("No mediaDevices available");
+    } catch (e) {
+      // Audio hardware fallback simulator
+      const simInterval = setInterval(() => {
+        setAudioLevel(Math.floor(Math.random() * 60) + 20);
+      }, 150);
+      return () => clearInterval(simInterval);
+    }
+  };
+
+  // API Call helper
+  async function callGeminiApi(url, body, retries = 5) {
+    let delay = 1000;
+    for (let i = 0; i < retries; i++) {
+      try {
+        const res = await fetch(`${url}?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (res.ok) return await res.json();
+      } catch (err) {
+        if (i === retries - 1) throw err;
+      }
+      await new Promise(r => setTimeout(r, delay));
+      delay *= 2;
+    }
+    throw new Error('API call failed after retries');
+  }
+
+  // Real Speech Analysis with Gemini 2.5 Flash
+  const analyzeSpeechWithAI = async (transcript, promptText) => {
+    const systemPrompt = `You are a strict, objective speech coach scoring a user's speech against a rubric.
+    Analyze the speech transcript provided. Calculate real metrics:
+    1. fillerCount: count of "um", "uh", "like", "you know", "so", "sort of", "actually".
+    2. paceWPM: words per minute estimation.
+    3. hesitationPause: estimated hesitation pause length before key words.
+    4. clarityScore: 0 to 100 vocal clarity index based on filler ratio and structure.
+    5. score: overall overall score (0-100).
+    6. feedbackSummary: 2 specific sentences highlighting baseline hesitation vs progress.`;
+
+    const body = {
+      contents: [{ parts: [{ text: `Speech Transcript: "${transcript}"` }] }],
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            fillerCount: { type: "INTEGER" },
+            paceWPM: { type: "INTEGER" },
+            hesitationPause: { type: "STRING" },
+            clarityScore: { type: "INTEGER" },
+            score: { type: "INTEGER" },
+            feedbackSummary: { type: "STRING" }
+          },
+          required: ["fillerCount", "paceWPM", "hesitationPause", "clarityScore", "score", "feedbackSummary"]
+        }
+      }
+    };
+
+    try {
+      const data = await callGeminiApi(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent',
+        body
+      );
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      return JSON.parse(text);
+    } catch (err) {
+      // Deterministic fallback if API is unreachable
+      const words = transcript.trim().split(/\s+/).filter(Boolean);
+      const fillers = (transcript.match(/\b(um|uh|like|you know|so|actually)\b/gi) || []).length;
+      const wordCount = words.length;
+      const pace = Math.min(160, Math.max(90, Math.round((wordCount / 0.75))));
+      const clarity = Math.max(35, 95 - fillers * 8);
+
+      return {
+        fillerCount: fillers,
+        paceWPM: pace,
+        hesitationPause: `${(fillers * 0.4 + 0.8).toFixed(1)}s`,
+        clarityScore: clarity,
+        score: Math.max(40, Math.round(clarity * 0.85)),
+        feedbackSummary: `Detected ${fillers} filler words. Work on steady pauses instead of using verbal placeholders.`
+      };
+    }
+  };
+
+  // Generate Believable Anti-Fluff Affirmation
+  const generateCalibratedAffirmation = async (baselineMetrics, trackTarget) => {
+    const systemPrompt = `You are a cognitive behavioral engine. Write a 1-sentence micro-affirmation tailored to the user's baseline.
+    CRITICAL RULE: Do NOT generate grandiose or fake statements like "I am the world's most charismatic speaker". The brain rejects nonsense.
+    Write an ambitious yet completely believable identity shift bridging their filler count (${baselineMetrics.fillerCount}) and initial score (${baselineMetrics.score}/100) toward "${trackTarget}".
+    Example: "I am someone who speaks with deliberate pauses and delivers my ideas clearly."`;
+
+    const body = {
+      contents: [{ parts: [{ text: `Target Goal: "${trackTarget}". Create 1 exact calibrated statement.` }] }],
+      systemInstruction: { parts: [{ text: systemPrompt }] }
+    };
+
+    try {
+      const data = await callGeminiApi(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent',
+        body
+      );
+      const resText = data.candidates?.[0]?.content?.parts?.[0]?.text.trim();
+      return resText ? resText.replace(/^"|"$/g, '') : trackTarget;
+    } catch (err) {
+      return `I am someone who speaks with deliberate pauses and clear intention.`;
+    }
+  };
+
+  // Start Live Audio Recording
+  const startRecording = () => {
+    setRecordedText('');
+    setMicError('');
+    setIsRecording(true);
+    setRecordingStage('recording');
+    setRecordingTime(0);
+
+    setupRealAudioAnalyser();
+
+    timerRef.current = setInterval(() => {
+      setRecordingTime(prev => prev + 1);
+    }, 1000);
+
+    if (recognitionRef.current) {
+      try { recognitionRef.current.start(); } catch (e) {}
+    }
+  };
+
+  // Stop Recording and Perform Analysis
+  const stopRecordingAndAnalyze = async () => {
+    setIsRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (micStreamRef.current && micStreamRef.current.getTracks) {
+      micStreamRef.current.getTracks().forEach(t => t.stop());
+    }
+
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+    }
+
+    setRecordingStage('analyzing');
+
+    const sampleToUse = recordedText.trim() || selectedTrack.sampleTranscript;
+    const metrics = await analyzeSpeechWithAI(sampleToUse, selectedTrack.prompt);
+
+    if (sprintState.currentDay === 0 && !sprintState.baselineRecorded) {
+      const calibrated = await generateCalibratedAffirmation(metrics, selectedTrack.target);
+      setSprintState(prev => ({
+        ...prev,
+        active: true,
+        trackId: selectedTrack.id,
+        baselineRecorded: true,
+        baselineMetrics: metrics,
+        calibratedAffirmation: calibrated,
+        currentDay: 1
+      }));
+    } else if (sprintState.currentDay === 7) {
+      setSprintState(prev => ({
+        ...prev,
+        finalMetrics: metrics,
+        completed: true
+      }));
+    }
+    setRecordingStage('done');
+  };
+
+  // Lock Daily Affirmation Task
+  const lockDailyWriting = (e) => {
+    e.preventDefault();
+    if (!writingIsExact) return;
+    setSprintState(prev => ({
+      ...prev,
+      writingCompletedToday: true,
+      history: {
+        ...prev.history,
+        [prev.currentDay]: { ...(prev.history[prev.currentDay] || {}), writing: writingInput }
+      }
+    }));
+  };
+
+  // Complete Daily Proof Action
+  const markProofActionDone = () => {
+    if (!sprintState.writingCompletedToday) return;
+    setSprintState(prev => ({
+      ...prev,
+      proofActionDoneToday: true,
+      history: {
+        ...prev.history,
+        [prev.currentDay]: { ...(prev.history[prev.currentDay] || {}), proofAction: true }
+      }
+    }));
+  };
+
+  // Advance Day with 24h Enforcement
+  const advanceToNextDay = () => {
+    if (!sprintState.writingCompletedToday || !sprintState.proofActionDoneToday) return;
+
+    if (sprintState.currentDay >= 6) {
+      setSprintState(prev => ({
+        ...prev,
+        currentDay: 7,
+        proofActionDoneToday: false,
+        writingCompletedToday: false,
+        lastCompletedTimestamp: Date.now()
+      }));
+      setRecordingStage('idle');
+      setRecordedText('');
+    } else {
+      setSprintState(prev => ({
+        ...prev,
+        currentDay: prev.currentDay + 1,
+        proofActionDoneToday: false,
+        writingCompletedToday: false,
+        lastCompletedTimestamp: Date.now()
+      }));
+      setWritingInput('');
+      setWritingIsExact(false);
+      setWritingMatchPercent(0);
+    }
+  };
+
+  // Complete and Archive Experiment
+  const finalizeExperiment = () => {
+    const finalScore = sprintState.finalMetrics?.score || 88;
+    const baseScore = sprintState.baselineMetrics?.score || 55;
+    const delta = finalScore - baseScore;
+
+    const newArchiveItem = {
+      id: 'arch_' + Date.now(),
+      date: new Date().toISOString().split('T')[0],
+      trackTitle: selectedTrack.title,
+      target: sprintState.calibratedAffirmation,
+      baseline: sprintState.baselineMetrics,
+      final: sprintState.finalMetrics || { fillerCount: 1, paceWPM: 145, pauseLength: '0.5s', score: 88, clarityScore: 92 },
+      deltaScore: `+${delta} pts`,
+      reducedFillers: `${Math.round(((sprintState.baselineMetrics.fillerCount - (sprintState.finalMetrics?.fillerCount || 1)) / (sprintState.baselineMetrics.fillerCount || 1)) * 100)}%`
+    };
+
+    setArchive([newArchiveItem, ...archive]);
+    setActiveTab('archived');
+  };
+
+  const formatSeconds = (sec) => {
+    const hrs = Math.floor(sec / 3600);
+    const mins = Math.floor((sec % 3600) / 60);
+    const secs = sec % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="min-h-screen bg-[#FAF7F2] text-stone-800 font-sans flex flex-col md:flex-row">
+      
+      {/* SIDEBAR NAVIGATION */}
+      <aside className="w-full md:w-72 bg-[#F3ECE1] border-b md:border-b-0 md:border-r border-stone-200 p-5 flex flex-col justify-between shrink-0">
+        <div>
+          <div className="flex items-center gap-3 mb-8">
+            <div className="p-2.5 bg-rose-500 rounded-2xl text-white font-black text-xl flex items-center justify-center w-11 h-11 shadow-md shadow-rose-500/20">
+              P
+            </div>
+            <div>
+              <h1 className="font-extrabold text-xl tracking-tight text-stone-900 leading-none">ProveIt</h1>
+              <p className="text-xs text-stone-500 mt-1 font-medium">7-Day Measured Identity</p>
+            </div>
+          </div>
+
+          <nav className="space-y-1.5">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-semibold transition-all ${
+                activeTab === 'dashboard' 
+                  ? 'bg-stone-900 text-stone-50 shadow-sm' 
+                  : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/50'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 text-rose-400" />
+              Active Experiment
+            </button>
+
+            <button
+              onClick={() => setActiveTab('archived')}
+              className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-semibold transition-all ${
+                activeTab === 'archived' 
+                  ? 'bg-stone-900 text-stone-50 shadow-sm' 
+                  : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Award className="w-4 h-4 text-amber-500" />
+                Proof Archive
+              </div>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-stone-300/60 text-stone-700 font-bold">
+                {archive.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('marketplace')}
+              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-semibold transition-all ${
+                activeTab === 'marketplace' 
+                  ? 'bg-stone-900 text-stone-50 shadow-sm' 
+                  : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/50'
+              }`}
+            >
+              <BookOpen className="w-4 h-4 text-orange-500" />
+              Coach Marketplace
+            </button>
+          </nav>
+        </div>
+
+        {/* Experiment Progress Widget */}
+        <div className="mt-8 pt-5 border-t border-stone-300">
+          <div className="bg-[#FAF7F2] rounded-2xl p-4 border border-stone-200 shadow-sm space-y-3">
+            <div className="flex items-center justify-between text-xs text-stone-500 font-medium">
+              <span>Active Sprint Protocol</span>
+              <Flame className="w-4 h-4 text-rose-500 fill-rose-500" />
+            </div>
+
+            <div className="text-2xl font-black text-stone-900">
+              {sprintState.active ? `Day ${sprintState.currentDay} of 7` : '0 Active Days'}
+            </div>
+
+            {sprintState.active && (
+              <div className="w-full bg-stone-200 rounded-full h-2 overflow-hidden">
+                <div 
+                  className="bg-rose-500 h-full transition-all duration-500"
+                  style={{ width: `${(sprintState.currentDay / 7) * 100}%` }}
+                />
+              </div>
+            )}
+
+            <p className="text-[11px] text-stone-500 leading-tight">
+              {sprintState.active 
+                ? 'No dashboard of 19 habits. Just 1 single identity experiment.' 
+                : 'Select 1 behavior gap to begin baseline test.'}
+            </p>
+
+            <div className="pt-2 border-t border-stone-200 flex items-center justify-between text-[11px]">
+              <span className="text-stone-500 font-medium">24h Speed Lock</span>
+              <button 
+                onClick={() => setBypassTimeLock(!bypassTimeLock)}
+                className={`px-2 py-0.5 rounded font-bold transition-all ${
+                  bypassTimeLock ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-600'
+                }`}
+              >
+                {bypassTimeLock ? 'Bypassed (Test Mode)' : 'Strict 24h'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* MAIN CONTAINER */}
+      <main className="flex-1 p-5 md:p-10 max-w-5xl mx-auto overflow-y-auto">
+
+        {/* TAB 1: DASHBOARD / SPRINT ENGINE */}
+        {activeTab === 'dashboard' && (
+          <div>
+            {!sprintState.active ? (
+              /* EXPERIMENT SETUP: SELECT TRACK & RECORD BASELINE */
+              <div className="space-y-8">
+                <div>
+                  <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-rose-100 border border-rose-200 text-rose-800 rounded-full text-xs font-bold mb-3 shadow-sm">
+                    <Zap className="w-3.5 h-3.5 text-rose-500 fill-rose-500" />
+                    7-Day Identity Experiment
+                  </div>
+                  <h2 className="text-3xl md:text-4xl font-black text-stone-900 tracking-tight">
+                    Choose One Target Identity
+                  </h2>
+                  <p className="text-stone-600 text-sm mt-1.5 max-w-2xl leading-relaxed">
+                    The blocker is rarely information—it is self-image. Pick 1 behavior gap. Record Day 0 baseline audio. Earn your identity with measurable proof on Day 7.
+                  </p>
+                </div>
+
+                {/* Identity Selection Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {TRACKS.map(t => (
+                    <div
+                      key={t.id}
+                      onClick={() => {
+                        setSelectedTrack(t);
+                        setRecordedText('');
+                      }}
+                      className={`cursor-pointer rounded-2xl p-6 border transition-all relative overflow-hidden bg-white ${
+                        selectedTrack.id === t.id
+                          ? 'border-rose-400 ring-2 ring-rose-400/20 shadow-md'
+                          : 'border-stone-200 hover:border-stone-300 shadow-sm'
+                      }`}
+                    >
+                      <div className="text-3xl mb-3">{t.icon}</div>
+                      <h3 className="font-bold text-stone-900 text-base mb-1">{t.title}</h3>
+                      <p className="text-xs text-rose-600 font-semibold mb-4 leading-normal">"{t.target}"</p>
+                      <div className="text-[11px] text-stone-500 pt-3 border-t border-stone-100 flex items-center justify-between">
+                        <span className="font-medium">Measured Metric:</span>
+                        <span className="font-bold text-stone-700">{t.metric}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Day 0 Mandatory Test Section */}
+                <div className="bg-white border border-stone-200 rounded-3xl p-6 md:p-8 space-y-6 shadow-sm">
+                  <div className="flex items-start gap-4">
+                    <div className="p-3.5 bg-rose-100 rounded-2xl border border-rose-200 text-rose-600 shrink-0">
+                      <Video className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-rose-600 uppercase tracking-wider">Mandatory Baseline Protocol</span>
+                      <h3 className="text-2xl font-black text-stone-900 mt-0.5">Day 0: Record Baseline Speech</h3>
+                      <p className="text-stone-600 text-sm mt-1">
+                        Prompt: <span className="text-stone-900 font-semibold">"{selectedTrack.prompt}"</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Speech Recorder Card */}
+                  <div className="bg-[#FAF7F2] border border-stone-200 rounded-2xl p-6 text-center space-y-5">
+                    {recordingStage === 'idle' && (
+                      <div className="space-y-5 py-2">
+                        <p className="text-xs text-stone-500 max-w-md mx-auto">
+                          Record a spoken response or load sample text. Gemini AI will measure filler words, words per minute, and pause hesitations.
+                        </p>
+                        
+                        <div className="flex flex-wrap items-center justify-center gap-3">
+                          <button
+                            onClick={startRecording}
+                            className="px-6 py-3.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-2xl text-sm transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-500/20"
+                          >
+                            <Mic className="w-4 h-4" /> Record Live Speech
+                          </button>
+
+                          <button
+                            onClick={() => setRecordedText(selectedTrack.sampleTranscript)}
+                            className="px-4 py-3.5 bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <FileText className="w-4 h-4 text-stone-500" /> Load Baseline Sample Text
+                          </button>
+                        </div>
+
+                        {/* Speech Transcript Editor Box */}
+                        <div className="text-left max-w-xl mx-auto pt-3">
+                          <label className="text-xs font-bold text-stone-600 flex items-center gap-1.5 mb-2">
+                            <Edit3 className="w-3.5 h-3.5 text-rose-500" /> Speech Transcript Preview
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={recordedText}
+                            onChange={(e) => setRecordedText(e.target.value)}
+                            placeholder="Speak into microphone or type response transcript..."
+                            className="w-full bg-white border border-stone-200 rounded-xl p-3.5 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-rose-400/30 focus:border-rose-400 font-medium"
+                          />
+                        </div>
+
+                        {recordedText.trim() && (
+                          <button
+                            onClick={stopRecordingAndAnalyze}
+                            className="w-full max-w-xl mx-auto py-3.5 bg-stone-900 hover:bg-stone-800 text-white font-bold rounded-2xl text-sm transition-all flex items-center justify-center gap-2 shadow-md"
+                          >
+                            <Sparkles className="w-4 h-4 text-rose-400" /> Analyze Baseline Metrics
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {recordingStage === 'recording' && (
+                      <div className="space-y-5 py-3">
+                        <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-rose-100 border border-rose-300 text-rose-700 rounded-full text-xs font-bold animate-pulse">
+                          <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                          Recording Audio ({recordingTime}s)
+                        </div>
+
+                        {/* Audio Waveform Meter */}
+                        <div className="flex items-center justify-center gap-1.5 h-12 py-2">
+                          {[40, 75, 30, 90, 60, 100, 45, 80, 55, 35].map((h, i) => (
+                            <div 
+                              key={i}
+                              className="w-1.5 bg-rose-400 rounded-full transition-all duration-100"
+                              style={{ height: `${Math.max(15, (audioLevel * h) / 100)}px` }}
+                            />
+                          ))}
+                        </div>
+
+                        <textarea
+                          rows={3}
+                          value={recordedText}
+                          onChange={(e) => setRecordedText(e.target.value)}
+                          placeholder="Listening to live voice..."
+                          className="w-full max-w-xl mx-auto bg-white border border-stone-200 rounded-xl p-3 text-sm text-stone-800 focus:outline-none"
+                        />
+
+                        <button
+                          onClick={stopRecordingAndAnalyze}
+                          className="px-6 py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-sm transition-all flex items-center justify-center gap-2 mx-auto shadow-md"
+                        >
+                          <Square className="w-4 h-4 fill-white" /> Complete Recording
+                        </button>
+                      </div>
+                    )}
+
+                    {recordingStage === 'analyzing' && (
+                      <div className="py-10 space-y-3">
+                        <RefreshCw className="w-8 h-8 text-rose-500 animate-spin mx-auto" />
+                        <p className="text-sm font-bold text-stone-800">Scoring baseline against rubric...</p>
+                        <p className="text-xs text-stone-500">Counting filler words, WPM pace, and hesitation gaps</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* ACTIVE EXPERIMENT DASHBOARD */
+              <div className="space-y-8">
+                {/* Experiment Banner Header */}
+                <div className="bg-white border border-stone-200 p-6 md:p-8 rounded-3xl shadow-sm space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-stone-100 pb-5">
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-bold text-rose-600 uppercase tracking-wider mb-1">
+                        <span>Day {sprintState.currentDay} of 7</span>
+                        <span>•</span>
+                        <span>Active Identity Experiment</span>
+                      </div>
+                      <h2 className="text-2xl md:text-3xl font-black text-stone-900">
+                        "{sprintState.calibratedAffirmation}"
+                      </h2>
+                      <p className="text-xs text-stone-500 mt-1">
+                        Calibrated directly from your Day 0 baseline friction.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3 bg-[#FAF7F2] p-3.5 rounded-2xl border border-stone-200 shrink-0">
+                      <div className="text-center px-3 border-r border-stone-200">
+                        <div className="text-[11px] text-stone-500 font-medium">Baseline Score</div>
+                        <div className="text-xl font-black text-amber-600">{sprintState.baselineMetrics?.score}/100</div>
+                      </div>
+                      <div className="text-center px-3">
+                        <div className="text-[11px] text-stone-500 font-medium">Baseline Fillers</div>
+                        <div className="text-xl font-black text-rose-600">{sprintState.baselineMetrics?.fillerCount}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Days Progress Bar Tracker */}
+                  <div className="grid grid-cols-7 gap-2 pt-2">
+                    {[1, 2, 3, 4, 5, 6, 7].map(dayNum => (
+                      <div 
+                        key={dayNum}
+                        className={`py-2.5 rounded-xl text-center text-xs font-bold border transition-all ${
+                          dayNum < sprintState.currentDay 
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-200' 
+                            : dayNum === sprintState.currentDay
+                            ? 'bg-rose-500 text-white border-rose-500 shadow-sm'
+                            : 'bg-stone-100 text-stone-400 border-stone-200'
+                        }`}
+                      >
+                        {dayNum < sprintState.currentDay ? '✓ Day ' + dayNum : 'Day ' + dayNum}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Day 1-6 Execution Panel */}
+                {sprintState.currentDay < 7 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* STEP 1: Strict Affirmation Requirement */}
+                    <div className={`p-6 md:p-7 rounded-3xl border transition-all bg-white ${
+                      sprintState.writingCompletedToday 
+                        ? 'border-emerald-300 ring-1 ring-emerald-300/30' 
+                        : 'border-stone-200 shadow-sm'
+                    }`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs font-bold px-3 py-1 bg-stone-100 text-stone-700 rounded-lg">
+                          Step 1: Intention Protocol
+                        </span>
+                        {sprintState.writingCompletedToday && (
+                          <span className="flex items-center gap-1 text-xs text-emerald-600 font-extrabold">
+                            <CheckCircle2 className="w-4 h-4" /> Locked
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="font-extrabold text-stone-900 text-lg mb-1">Write Your Exact Statement</h3>
+                      <p className="text-xs text-stone-500 mb-4 leading-relaxed">
+                        To set cognitive intention, type the statement character-for-character. The button unlocks only when 100% matched.
+                      </p>
+
+                      <form onSubmit={lockDailyWriting} className="space-y-4">
+                        <div className="space-y-2">
+                          <div className="p-3 bg-[#FAF7F2] border border-stone-200 rounded-xl text-xs text-stone-800 font-semibold leading-relaxed">
+                            "{sprintState.calibratedAffirmation}"
+                          </div>
+
+                          <textarea
+                            disabled={sprintState.writingCompletedToday}
+                            rows={3}
+                            value={writingInput}
+                            onChange={(e) => handleWritingChange(e.target.value)}
+                            placeholder="Type statement above word for word..."
+                            className="w-full bg-white border border-stone-200 rounded-xl p-3.5 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-rose-400/30 focus:border-rose-400 disabled:bg-stone-100 font-medium"
+                          />
+
+                          {!sprintState.writingCompletedToday && writingInput.length > 0 && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[11px] font-bold">
+                                <span className={writingIsExact ? 'text-emerald-600' : 'text-amber-600'}>
+                                  {writingIsExact ? '100% Match Verified!' : `${writingMatchPercent}% Character Accuracy`}
+                                </span>
+                              </div>
+                              <div className="w-full bg-stone-200 h-1.5 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full transition-all ${writingIsExact ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                  style={{ width: `${writingMatchPercent}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {!sprintState.writingCompletedToday && (
+                          <button
+                            type="submit"
+                            disabled={!writingIsExact}
+                            className="w-full py-3 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-200 disabled:text-stone-400 text-white font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-2"
+                          >
+                            <Lock className="w-3.5 h-3.5" /> Lock Daily Intention
+                          </button>
+                        )}
+                      </form>
+                    </div>
+
+                    {/* STEP 2: Proof Action Requirement */}
+                    <div className={`p-6 md:p-7 rounded-3xl border transition-all bg-white ${
+                      sprintState.proofActionDoneToday 
+                        ? 'border-emerald-300 ring-1 ring-emerald-300/30' 
+                        : 'border-stone-200 shadow-sm'
+                    }`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-xs font-bold px-3 py-1 bg-stone-100 text-stone-700 rounded-lg">
+                          Step 2: Behavioral Evidence
+                        </span>
+                        {sprintState.proofActionDoneToday && (
+                          <span className="flex items-center gap-1 text-xs text-emerald-600 font-extrabold">
+                            <CheckCircle2 className="w-4 h-4" /> Earned
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="font-extrabold text-stone-900 text-lg mb-1">Execute Today's Proof Action</h3>
+                      <p className="text-xs text-stone-500 mb-4 leading-relaxed">
+                        The writing is intention. The action is evidence. You cannot earn Day {sprintState.currentDay} without completing both.
+                      </p>
+
+                      <div className="p-4 bg-orange-50 border border-orange-200 rounded-2xl text-xs text-stone-800 mb-6 space-y-1">
+                        <span className="font-bold text-orange-900 block">🎯 Day {sprintState.currentDay} Action:</span>
+                        <p className="text-stone-700">
+                          {selectedTrack.id === 'public_speaking' && 'Record a 60-second video speaking on camera without restarts.'}
+                          {selectedTrack.id === 'cold_calling' && 'Make 1 real cold outreach call or send 1 unprompted video pitch.'}
+                          {selectedTrack.id === 'assertive_meetings' && 'Speak within the first 5 minutes of your next team sync.'}
+                        </p>
+                      </div>
+
+                      {!sprintState.proofActionDoneToday ? (
+                        <button
+                          onClick={markProofActionDone}
+                          disabled={!sprintState.writingCompletedToday}
+                          className="w-full py-3.5 bg-rose-500 hover:bg-rose-600 disabled:bg-stone-200 disabled:text-stone-400 text-white font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-2 shadow-sm"
+                        >
+                          <ShieldCheck className="w-4 h-4" /> Complete Proof Action
+                        </button>
+                      ) : (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs text-emerald-800 text-center font-bold">
+                          Day {sprintState.currentDay} Protocol Earned!
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 24-HOUR ENFORCED ADVANCE BUTTON */}
+                    <div className="md:col-span-2 bg-white border border-stone-200 p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+                      <div>
+                        <h4 className="font-extrabold text-stone-900 text-base">Next Day Lock Protocol</h4>
+                        <p className="text-xs text-stone-500 mt-0.5">
+                          {timeRemainingSeconds > 0 
+                            ? `Next sprint day unlocks in ${formatSeconds(timeRemainingSeconds)}`
+                            : 'Both tasks complete. Ready to advance to next identity day.'}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={advanceToNextDay}
+                        disabled={
+                          !sprintState.writingCompletedToday || 
+                          !sprintState.proofActionDoneToday || 
+                          (timeRemainingSeconds > 0 && !bypassTimeLock)
+                        }
+                        className="px-7 py-3.5 bg-stone-900 hover:bg-stone-800 disabled:bg-stone-200 disabled:text-stone-400 text-white font-bold rounded-2xl text-sm transition-all flex items-center gap-2 shadow-sm shrink-0"
+                      >
+                        {timeRemainingSeconds > 0 && !bypassTimeLock ? (
+                          <>
+                            <Clock className="w-4 h-4 text-amber-400" /> Locked ({formatSeconds(timeRemainingSeconds)})
+                          </>
+                        ) : (
+                          <>
+                            Advance to Day {sprintState.currentDay + 1} <ArrowRight className="w-4 h-4" />
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* DAY 7 FINAL RETEST & DELTA PROOF REPORT */
+                  <div className="bg-white border border-stone-200 rounded-3xl p-6 md:p-8 space-y-6 shadow-sm">
+                    <div>
+                      <span className="px-3.5 py-1.5 bg-rose-100 border border-rose-200 text-rose-800 rounded-full text-xs font-bold">
+                        Day 7: Final Retest Protocol
+                      </span>
+                      <h3 className="text-2xl font-black text-stone-900 mt-2">Re-run Exact Baseline Test</h3>
+                      <p className="text-xs text-stone-500 mt-1">
+                        Same prompt, same rubric scoring. We measure the exact behavioral delta between Day 0 and Day 7.
+                      </p>
+                    </div>
+
+                    {!sprintState.completed ? (
+                      <div className="bg-[#FAF7F2] border border-stone-200 rounded-2xl p-6 text-center space-y-4">
+                        {recordingStage === 'idle' && (
+                          <div className="space-y-4 py-2">
+                            <p className="text-xs text-stone-600 font-semibold">Prompt: "{selectedTrack.prompt}"</p>
+                            
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                              <button
+                                onClick={startRecording}
+                                className="px-6 py-3.5 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-2xl text-sm transition-all flex items-center gap-2 shadow-sm"
+                              >
+                                <Mic className="w-4 h-4" /> Record Day 7 Retest Speech
+                              </button>
+
+                              <button
+                                onClick={() => setRecordedText("I am confident to introduce our project today. Our strategy directly addresses outreach friction with zero filler pauses or hesitations.")}
+                                className="px-4 py-3.5 bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold rounded-2xl text-xs transition-all flex items-center gap-1.5"
+                              >
+                                <FileText className="w-4 h-4" /> Load Retest Sample
+                              </button>
+                            </div>
+
+                            <div className="text-left max-w-xl mx-auto pt-2">
+                              <label className="text-xs font-bold text-stone-600 flex items-center gap-1.5 mb-1.5">
+                                <Edit3 className="w-3.5 h-3.5 text-rose-500" /> Day 7 Retest Transcript
+                              </label>
+                              <textarea
+                                rows={3}
+                                value={recordedText}
+                                onChange={(e) => setRecordedText(e.target.value)}
+                                placeholder="Speak or type final retest speech..."
+                                className="w-full bg-white border border-stone-200 rounded-xl p-3.5 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-rose-400/30"
+                              />
+                            </div>
+
+                            {recordedText.trim() && (
+                              <button
+                                onClick={stopRecordingAndAnalyze}
+                                className="w-full max-w-xl mx-auto py-3.5 bg-stone-900 hover:bg-stone-800 text-white font-bold rounded-2xl text-sm transition-all flex items-center justify-center gap-2 shadow-md"
+                              >
+                                <Sparkles className="w-4 h-4 text-rose-400" /> Calculate Final 7-Day Delta
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {recordingStage === 'recording' && (
+                          <div className="space-y-4 py-2">
+                            <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-rose-100 text-rose-700 rounded-full text-xs font-bold animate-pulse">
+                              Recording Retest Speech ({recordingTime}s)
+                            </div>
+                            <textarea
+                              rows={3}
+                              value={recordedText}
+                              onChange={(e) => setRecordedText(e.target.value)}
+                              placeholder="Recording audio stream..."
+                              className="w-full max-w-xl mx-auto bg-white border border-stone-200 rounded-xl p-3 text-sm text-stone-800"
+                            />
+                            <button
+                              onClick={stopRecordingAndAnalyze}
+                              className="px-6 py-3.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl text-sm transition-all flex items-center gap-2 mx-auto"
+                            >
+                              <Square className="w-4 h-4 fill-white" /> Complete Retest
+                            </button>
+                          </div>
+                        )}
+
+                        {recordingStage === 'analyzing' && (
+                          <div className="py-8 space-y-2">
+                            <RefreshCw className="w-8 h-8 text-rose-500 animate-spin mx-auto" />
+                            <p className="text-sm font-bold text-stone-800">Computing Day 0 vs Day 7 Speech Delta...</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* DELTA REPORT CARD */
+                      <div className="space-y-6">
+                        <div className="bg-[#FAF7F2] border border-stone-200 rounded-2xl p-6 md:p-8 space-y-6">
+                          <div className="text-center border-b border-stone-200 pb-4">
+                            <span className="text-xs text-emerald-700 font-extrabold uppercase tracking-widest bg-emerald-100 px-3 py-1 rounded-full">
+                              Proof Verified
+                            </span>
+                            <h4 className="text-3xl font-black text-stone-900 mt-2">7-Day Proven Delta Report</h4>
+                            <p className="text-xs text-stone-500 mt-1">
+                              Target Identity: <span className="font-bold text-stone-800">"{sprintState.calibratedAffirmation}"</span>
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-white p-4 rounded-2xl border border-stone-200 text-center shadow-sm">
+                              <div className="text-[11px] font-bold text-stone-500">Fillers Reduced</div>
+                              <div className="text-xl font-black text-emerald-600 mt-1">
+                                {sprintState.baselineMetrics?.fillerCount} → {sprintState.finalMetrics?.fillerCount || 1}
+                              </div>
+                            </div>
+
+                            <div className="bg-white p-4 rounded-2xl border border-stone-200 text-center shadow-sm">
+                              <div className="text-[11px] font-bold text-stone-500">Pace WPM</div>
+                              <div className="text-xl font-black text-stone-900 mt-1">
+                                {sprintState.baselineMetrics?.paceWPM} → {sprintState.finalMetrics?.paceWPM || 142}
+                              </div>
+                            </div>
+
+                            <div className="bg-white p-4 rounded-2xl border border-stone-200 text-center shadow-sm">
+                              <div className="text-[11px] font-bold text-stone-500">Hesitation Gap</div>
+                              <div className="text-xl font-bold text-amber-600 mt-1">
+                                {sprintState.baselineMetrics?.hesitationPause} → {sprintState.finalMetrics?.hesitationPause || '0.5s'}
+                              </div>
+                            </div>
+
+                            <div className="bg-white p-4 rounded-2xl border border-stone-200 text-center shadow-sm">
+                              <div className="text-[11px] font-bold text-stone-500">Score Delta</div>
+                              <div className="text-xl font-black text-emerald-600 mt-1">
+                                +{(sprintState.finalMetrics?.score || 88) - sprintState.baselineMetrics?.score} pts
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="p-4 bg-white rounded-2xl border border-stone-200 text-xs text-stone-700 leading-relaxed">
+                            <span className="font-bold text-stone-900 block mb-1">Coach Synthesis:</span>
+                            {sprintState.finalMetrics?.feedbackSummary || 'Significant reduction in verbal hesitation placeholders. Delivery showed firm volume and continuous phrase flow.'}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={finalizeExperiment}
+                          className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-2xl text-sm transition-all flex items-center justify-center gap-2 shadow-md"
+                        >
+                          <Share2 className="w-4 h-4" /> Save Report & Add to Proof Archive
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: PROOF REPORTS ARCHIVE */}
+        {activeTab === 'archived' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-black text-stone-900">Proof Archive</h2>
+              <p className="text-xs text-stone-500 mt-1">
+                Your portfolio of verified 7-day identity sprints. Unlike habit trackers, this records proven change.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {archive.map((report) => (
+                <div key={report.id} className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-stone-100 pb-4">
+                    <div>
+                      <span className="text-[11px] font-bold text-stone-400 uppercase tracking-wider">{report.date}</span>
+                      <h3 className="font-black text-stone-900 text-lg">{report.trackTitle}</h3>
+                      <p className="text-xs text-rose-600 font-semibold mt-0.5">"{report.target}"</p>
+                    </div>
+
+                    <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-full text-xs font-black shrink-0">
+                      <TrendingUp className="w-4 h-4" /> Verified Delta: {report.deltaScore}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                    <div className="bg-[#FAF7F2] p-3.5 rounded-2xl border border-stone-200">
+                      <span className="text-stone-500 font-medium">Filler Reduction</span>
+                      <p className="text-stone-900 font-black mt-1">{report.baseline.fillerCount} → {report.final.fillerCount} ({report.reducedFillers} drop)</p>
+                    </div>
+                    <div className="bg-[#FAF7F2] p-3.5 rounded-2xl border border-stone-200">
+                      <span className="text-stone-500 font-medium">Pace Transition</span>
+                      <p className="text-stone-900 font-black mt-1">{report.baseline.paceWPM} WPM → {report.final.paceWPM} WPM</p>
+                    </div>
+                    <div className="bg-[#FAF7F2] p-3.5 rounded-2xl border border-stone-200">
+                      <span className="text-stone-500 font-medium">Hesitation Pause</span>
+                      <p className="text-stone-900 font-black mt-1">{report.baseline.pauseLength} → {report.final.pauseLength}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: COACH MARKETPLACE */}
+        {activeTab === 'marketplace' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-black text-stone-900">Coach Marketplace</h2>
+              <p className="text-xs text-stone-500 mt-1">
+                7-day challenge packs created by speaking coaches and sales leaders with custom rubrics.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="bg-white border border-stone-200 rounded-3xl p-6 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold px-3 py-1 bg-amber-100 text-amber-800 border border-amber-200 rounded-lg">
+                    Sales Execution
+                  </span>
+                  <span className="text-sm font-black text-stone-900">$29</span>
+                </div>
+                <h3 className="font-extrabold text-stone-900 text-lg">Cold Call Fear Exorcism</h3>
+                <p className="text-xs text-stone-500 leading-relaxed">
+                  Authored by Marcus Vance. Overcome phone reluctance through 7 days of recorded dials and real hesitation scoring.
+                </p>
+                <button className="w-full py-3 bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs rounded-2xl transition-all">
+                  Unlock Challenge Pack
+                </button>
+              </div>
+
+              <div className="bg-white border border-stone-200 rounded-3xl p-6 space-y-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold px-3 py-1 bg-rose-100 text-rose-800 border border-rose-200 rounded-lg">
+                    Keynote Presence
+                  </span>
+                  <span className="text-sm font-black text-stone-900">$39</span>
+                </div>
+                <h3 className="font-extrabold text-stone-900 text-lg">Executive Presence & Resonance</h3>
+                <p className="text-xs text-stone-500 leading-relaxed">
+                  Authored by Elena Rostova. Eliminate monotone delivery and filler pauses in high-stakes board presentations.
+                </p>
+                <button className="w-full py-3 bg-stone-900 hover:bg-stone-800 text-white font-bold text-xs rounded-2xl transition-all">
+                  Unlock Challenge Pack
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <ProveItApp />
+    </ErrorBoundary>
+  );
+}
